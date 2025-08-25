@@ -1,0 +1,153 @@
+{% load static %}
+<link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.0/css/all.min.css" />
+
+<link rel="stylesheet" type="text/css" href="{% static 'css/navbar.css' %}">
+
+<div class="top-navbar">
+  <div class="hamburger" id="hamburger">
+    <i class="fas fa-bars"></i>
+  </div>
+
+  <div class="logo">BRITS Helpdesk</div>
+
+  <div class="nav-items" id="navItems">
+    <!--<div class="search-bar">
+      <i class="fas fa-search"></i>
+      <input type="text" id="navbarSearchInput" placeholder="Search dashboard...">
+    </div>-->
+    <!-- Notification Bell -->
+    <div class="notifications" id="notificationBell">
+      <i class="fas fa-bell"></i>
+      <span class="badge" id="notificationCount" style="display: none;">0</span>
+
+      <!-- Dropdown for escalated tickets -->
+      <div class="dropdown-menu notifications-dropdown" id="notificationsDropdown">
+        <div id="notificationsList">
+          <p class="empty">No escalated tickets</p>
+        </div>
+        <div class="view-all">
+          <a href="{% url 'escalated_tickets_list' %}">View all</a>
+        </div>
+      </div>
+    </div>
+
+
+    <div class="user-profile" id="userProfile">
+      <div class="profile-trigger">
+          <img src="{% if user.profile.avatar %}{{ user.profile.avatar.url }}{% else %}https://placehold.co/40x40{% endif %}" alt="User Avatar">
+        <span>{{ user.get_full_name|default:user.username }}</span>
+        <i class="fas fa-chevron-down"></i>
+      </div>
+      <div class="dropdown-menu">
+        <a href="{% url 'profile_view' %}">👤 Profile</a>
+        <a href="{% url 'settings' %}">⚙️ Settings</a>
+        <form id="logout-form" method="post" action="{% url 'logout' %}" style="margin: 0;">
+          {% csrf_token %}
+          <button type="submit" class="dropdown-link logout-btn">🚪 Logout</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</div>
+
+<script>
+  const profileViewUrl = "{% url 'profile_view' %}";
+
+// Declare the WebSocket connection outside the IIFE to make it accessible globally
+let escalationSocket;
+
+(function() {
+    const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
+    const url = `${wsScheme}://${window.location.host}/ws/escalations/`;
+    console.log("Connecting to WebSocket at:", url);  
+    escalationSocket = new WebSocket(url);
+})();
+
+function renderEscalations(tickets) {
+  const countEl = document.getElementById("notificationCount");
+  const listEl  = document.getElementById("notificationsList");
+
+  if (!countEl || !listEl) return; // navbar not present on this page
+
+  // Limit the notifications to the latest 5
+  const latestTickets = tickets.slice(0, 5); 
+
+  countEl.textContent = latestTickets.length;
+  countEl.style.display = latestTickets.length > 0 ? "inline-block" : "none";
+
+  listEl.innerHTML = "";
+  if (latestTickets.length === 0) {
+    listEl.innerHTML = `<li class="dropdown-item text-muted">No escalations</li>`;
+    return;
+  }
+
+  latestTickets.forEach(t => {
+    const div = document.createElement("div");
+    div.classList.add("notification-item");
+    div.innerHTML = `
+      <a class="dropdown-item" href="/tickets/${t.id}/">
+        #${t.id} - ${t.title}<br>
+        <small>${t.priority} | ${t.escalated_at}</small>
+      </a>
+    `;
+    listEl.appendChild(div);
+  });
+}
+
+
+escalationSocket.onmessage = (e) => {
+  const data = JSON.parse(e.data);
+
+  // Case 1: full tickets list
+  if (data.tickets) {
+    renderEscalations(data.tickets);
+  }
+
+  // Case 2: single escalation event
+  if (data.type === "escalation") {
+    const countEl = document.getElementById("notificationCount");
+    const listEl  = document.getElementById("notificationsList");
+
+    if (!countEl || !listEl) return;
+
+    let current = parseInt(countEl.textContent || "0");
+    countEl.textContent = current + 1;
+    countEl.style.display = "inline-block";
+
+    // remove "No escalations" placeholder if present
+    const emptyMsg = listEl.querySelector(".empty");
+    if (emptyMsg) emptyMsg.remove();
+
+    const div = document.createElement("div");
+    div.classList.add("notification-item");
+    div.innerHTML = `
+      <a class="dropdown-item" href="/tickets/${data.ticket_id}/">
+        #${data.ticket_id} - ${data.title}<br>
+        <small>${data.priority} | ${data.escalated_at}</small>
+      </a>
+    `;
+    listEl.prepend(div);
+
+    // Limit to latest 5
+    const items = listEl.querySelectorAll('.notification-item');
+    if (items.length > 5) {
+      listEl.removeChild(items[items.length - 1]);
+    }
+  }
+};
+
+
+escalationSocket.onclose = () => {
+  console.error("WebSocket closed unexpectedly");
+};
+
+// Simple dropdown toggle
+const bell = document.getElementById("notificationBell");
+const menu = document.getElementById("notificationsDropdown");
+if (bell && menu) {
+  bell.addEventListener("click", () => {
+    menu.classList.toggle("show"); // make sure your CSS shows .show
+  });
+}
+</script>
+<script src="{% static 'js/files_navbar.js' %}"></script>
