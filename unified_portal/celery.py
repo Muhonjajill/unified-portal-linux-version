@@ -15,5 +15,4 @@ app.conf.beat_schedule = {
         "task": "core.tasks.run_auto_escalation",   # must match your task name
         "schedule": crontab(minute="*/1"),        # every 5 minutes
     },
-}
-"""
+}"""

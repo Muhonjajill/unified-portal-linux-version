@@ -50,6 +50,8 @@ from core.priority_rules import determine_priority
 from django.conf import settings
 from django.urls import reverse
 from openpyxl.styles import Border, Side
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync 
 
 def in_group(user, group_name):
     return user.is_authenticated and (user.is_superuser or user.groups.filter(name=group_name).exists())
