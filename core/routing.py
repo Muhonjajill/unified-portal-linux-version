@@ -1,8 +1,8 @@
-
 # core/routing.py
+
 from django.urls import re_path
-from . import consumers
+from .consumers import EscalationConsumer
 
 websocket_urlpatterns = [
-    re_path(r'ws/escalations/$', consumers.EscalationConsumer.as_asgi()), 
+    re_path(r"ws/escalations/$", EscalationConsumer.as_asgi()),
 ]

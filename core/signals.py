@@ -4,6 +4,8 @@ from django.contrib.auth.models import User, Group, Permission
 from django.contrib.contenttypes.models import ContentType
 from core.models import ActivityLog, File, FileAccessLog, Profile, Ticket, TicketComment
 from django.core.exceptions import ObjectDoesNotExist
+from channels.layers import get_channel_layer
+from asgiref.sync import async_to_sync
 
 
 @receiver(post_migrate)
@@ -205,6 +207,26 @@ def log_ticket_comment(sender, instance, created, **kwargs):
 
 @receiver(post_save, sender=Ticket)
 def log_ticket_resolution(sender, instance, created, **kwargs):
-    if instance.status == 'Resolved':  # You can check your ticket status values
+    if instance.status == 'Closed':  
         action = f"Ticket resolved: {instance.title}"
         ActivityLog.objects.create(ticket=instance, action=action, user=instance.updated_by)
+
+
+@receiver(post_save, sender=Ticket)
+def send_ticket_creation_notification(sender, instance, created, **kwargs):
+    if created:
+        print('A new Ticket has been created')
+        channel_layer = get_channel_layer()
+        payload = {
+            "id": instance.id,
+            "title": instance.title,
+            "priority": instance.priority or "",
+            "created_at": instance.created_at.strftime("%Y-%m-%d %H:%M"),
+        }
+        async_to_sync(channel_layer.group_send)(
+            "escalations",
+            {
+                "type": "ticket_creation",  
+                "ticket": payload,
+            }
+        )

@@ -1882,6 +1882,7 @@ def tickets(request):
 
 @login_required(login_url='login')
 def create_ticket(request):
+    # Determine the user's group and allowed roles
     user_group = None
     allowed_roles = []
     if request.user.groups.exists():
@@ -1892,43 +1893,66 @@ def create_ticket(request):
         allowed_roles = ['Manager', 'Staff']
     else:
         allowed_roles = ['Staff']
+    # Handle form submission
     if request.method == 'POST':
         form = TicketForm(request.POST, user=request.user)
         if form.is_valid():
             ticket = form.save(commit=False)
-
-            # Prevent using inactive terminal
+            # Prevent using an inactive terminal
             if ticket.terminal and not ticket.terminal.is_active:
-                messages.error(request, f"Terminal '{ticket.terminal.cdm_name}' is disabled. Please enable it before creating a ticket.")
+                messages.error(
+                    request,
+                    f"Terminal '{ticket.terminal.cdm_name}' is disabled. "
+                    "Please enable it before creating a ticket."
+                )
                 return redirect('create_ticket')
-
-            #category_name = ticket.problem_category.name if ticket.problem_category else 'other'
-            #ticket.priority = determine_priority(category_name, ticket.description)
+            # Set audit fields
             ticket.created_by = request.user
             custom_date = form.cleaned_data.get('custom_created_at')
             if custom_date:
                 ticket.created_at = custom_date
-
+            # Auto-assign customer & region if a terminal is chosen
             if ticket.terminal:
                 ticket.customer = ticket.terminal.customer
                 ticket.region = ticket.terminal.region
-
             ticket.save()
-            return redirect('create_ticket' if 'create_another' in request.POST else 'tickets')
+            # Broadcast the new ticket over WebSocket
+            channel_layer = get_channel_layer()
+            async_to_sync(channel_layer.group_send)(
+                "escalations",
+                {
+                    "type": "ticket.creation",
+                    "ticket": {
+                        "id": ticket.id,
+                        "title": ticket.title,
+                        "priority": ticket.priority,
+                        "created_at": ticket.created_at.strftime("%Y-%m-%d %H:%M")
+                    }
+                }
+            )
+            # Redirect based on “create another” checkbox
+            if 'create_another' in request.POST:
+                return redirect('create_ticket')
+            return redirect('tickets')
     else:
+        # GET: instantiate empty form (optionally prefilling terminal_id)
         terminal_id = request.GET.get('terminal_id')
         if terminal_id:
             form = TicketForm(user=request.user, terminal_id=terminal_id)
         else:
             form = TicketForm(user=request.user)
-
+    # Build issue-category → sub-issues map for JS
     cats = ProblemCategory.objects.all()
-    js_mapping = { str(cat.pk): ISSUE_MAPPING.get(cat.name, []) for cat in cats }
+    js_mapping = {
+        str(cat.pk): ISSUE_MAPPING.get(cat.name, [])
+        for cat in cats
+    }
     return render(request, 'core/helpdesk/create_ticket.html', {
         'form': form,
         'issue_mapping': json.dumps(js_mapping),
         'user_group': user_group,
-        'allowed_roles': allowed_roles})
+        'allowed_roles': allowed_roles,
+    })
 
 
 from django.template.loader import render_to_string 
@@ -2031,23 +2055,14 @@ def notify_group(level, ticket):
     )
 
 def get_escalated_tickets(request):
-    # Fetch the latest 5 escalated tickets
-    escalated_tickets = Ticket.objects.filter(is_escalated=True).order_by('-escalated_at')[:5]
-
-    # Return JSON with latest 5 tickets
-    data = {
-        "count": escalated_tickets.count(),
-        "tickets": [
-            {
-                "id": t.id,
-                "title": t.title,
-                "escalated_at": t.escalated_at.strftime('%Y-%m-%d %H:%M'),
-                "priority": t.priority,
-            }
-            for t in escalated_tickets
-        ]
-    }
-    return JsonResponse(data)
+    tickets = Ticket.objects.filter(is_escalated=True).order_by("-escalated_at")[:5]
+    ticket_data = [{
+        "id": ticket.id,
+        "title": ticket.title,
+        "priority": ticket.priority,
+        "escalated_at": ticket.escalated_at.strftime("%Y-%m-%d %H:%M")
+    } for ticket in tickets]
+    return JsonResponse({"tickets": ticket_data})
 
 
 def escalated_tickets_page(request):
