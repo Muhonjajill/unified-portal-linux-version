@@ -157,29 +157,42 @@ function renderNotifications(tickets, totalCount) {
 
 
 // ==== Handle New Ticket Event ====
+// Handle new ticket event
 function handleNewTicket(ticket) {
   const countEl = document.getElementById("notificationCount");
   const listEl = document.getElementById("notificationsList");
+
   if (!countEl || !listEl) return;
 
   const emptyMsg = document.querySelector(".empty");
   if (emptyMsg) emptyMsg.remove();
 
-  // Default the type if backend omitted it (safety)
+  // Check the ticket object and log it
+  console.log("Ticket received:", ticket);
+
+  // Set notification_type to 'new' if no escalation info exists
   if (!ticket.notification_type) {
     ticket.notification_type = (ticket.is_escalated || ticket.escalated_at) ? "escalated" : "new";
   }
+
+  // Ensure that new tickets are assigned "new" type if no escalation exists
+  if (!ticket.is_escalated && !ticket.escalated_at) {
+    ticket.notification_type = "new";
+  }
+
+  console.log("New ticket type:", ticket.notification_type);
 
   listEl.prepend(createNotificationItem(ticket));
 
   const items = listEl.querySelectorAll(".notification-item");
   if (items.length > 5) listEl.removeChild(items[items.length - 1]);
 
-  // If we don't know the real total, at least bump the badge locally
   const current = parseInt(countEl.textContent || "0", 10);
   countEl.textContent = isNaN(current) ? 1 : (current + 1);
   countEl.style.display = "inline-block";
 }
+
+
 
 
 // ==== Show Text Notification ====
