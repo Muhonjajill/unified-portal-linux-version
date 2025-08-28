@@ -82,6 +82,10 @@ let escalationSocket;
         if (data.message) showNotification(data.message);
         break;
 
+      case "unassigned_ticket_notification":
+        if (data.ticket) handleNewUnassignedTicket(data.ticket);
+        break;
+
       default:
         console.warn("⚠️ Unknown WebSocket event type:", data.type);
     }
@@ -191,6 +195,29 @@ function handleNewTicket(ticket) {
   countEl.textContent = isNaN(current) ? 1 : (current + 1);
   countEl.style.display = "inline-block";
 }
+
+function handleNewUnassignedTicket(ticket) {
+  const countEl = document.getElementById("notificationCount");
+  const listEl = document.getElementById("notificationsList");
+
+  if (!countEl || !listEl) return;
+
+  const emptyMsg = document.querySelector(".empty");
+  if (emptyMsg) emptyMsg.remove();
+
+  console.log("Unassigned ticket received:", ticket);
+
+  ticket.notification_type = "unassigned"; // Set notification type to unassigned
+  listEl.prepend(createNotificationItem(ticket));
+
+  const items = listEl.querySelectorAll(".notification-item");
+  if (items.length > 5) listEl.removeChild(items[items.length - 1]);
+
+  const current = parseInt(countEl.textContent || "0", 10);
+  countEl.textContent = isNaN(current) ? 1 : (current + 1);
+  countEl.style.display = "inline-block";
+}
+
 
 
 

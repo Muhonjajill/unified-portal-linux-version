@@ -288,6 +288,7 @@ class Ticket(models.Model):
     brts_unit = models.ForeignKey(Unit, on_delete=models.SET_NULL, null=True)
     problem_category = models.ForeignKey(ProblemCategory, on_delete=models.SET_NULL, null=True)
     terminal = models.ForeignKey(Terminal, on_delete=models.CASCADE, null=True, blank=True)
+    zone = models.ForeignKey('Zone', on_delete=models.SET_NULL, null=True, blank=True)
     description = models.TextField()
 
     customer = models.ForeignKey(Customer, on_delete=models.CASCADE, null=False, blank=False)

@@ -62,3 +62,17 @@ class EscalationConsumer(AsyncWebsocketConsumer):
             "type": "escalation_message",
             "message": msg if isinstance(msg, str) else json.dumps(msg),
         }))
+
+
+    async def unassigned_ticket_notification(self, event):
+        """Send unassigned ticket notification."""
+        ticket = event.get("ticket")
+        if ticket:
+            # Ensure ticket is an object, not a dict
+            if isinstance(ticket, dict):  # If it's a dictionary, retrieve the object from the DB
+                ticket = await database_sync_to_async(Ticket.objects.get)(id=ticket.get("id"))
+            ticket_data = serialize_ticket(ticket)  # Now it should be a model instance
+            await self.send(text_data=json.dumps({
+                "type": "unassigned_ticket_notification",
+                "ticket": ticket_data
+            }))

@@ -6,6 +6,8 @@ import logging
 logger = logging.getLogger(__name__)
 
 # Mapping of categories → issue → priority
+
+
 PRIORITY_MATRIX = {
     "Hardware Related": {
         "Note rejects": "high",
