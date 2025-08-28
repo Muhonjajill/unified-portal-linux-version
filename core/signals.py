@@ -211,7 +211,7 @@ def log_ticket_resolution(sender, instance, created, **kwargs):
         action = f"Ticket resolved: {instance.title}"
         ActivityLog.objects.create(ticket=instance, action=action, user=instance.updated_by)
 
-
+"""
 @receiver(post_save, sender=Ticket)
 def send_ticket_creation_notification(sender, instance, created, **kwargs):
     if created:
@@ -226,7 +226,13 @@ def send_ticket_creation_notification(sender, instance, created, **kwargs):
         async_to_sync(channel_layer.group_send)(
             "escalations",
             {
-                "type": "ticket_creation",  
-                "ticket": payload,
+                "type": "ticket_creation",
+                "ticket": {
+                    "id": instance.id,
+                    "title": instance.title,
+                    "priority": instance.priority,
+                    "created_at": instance.created_at.strftime("%Y-%m-%d %H:%M"),
+                }
             }
         )
+"""

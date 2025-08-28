@@ -1880,6 +1880,8 @@ def tickets(request):
         'status_filter': status_filter,
     })
 
+from core.uttils.serializers import serialize_ticket
+
 @login_required(login_url='login')
 def create_ticket(request):
     # Determine the user's group and allowed roles
@@ -1888,7 +1890,7 @@ def create_ticket(request):
     if request.user.groups.exists():
         user_group = request.user.groups.first().name
     if user_group == 'Admin':
-        allowed_roles = ['Admin', 'Manager']
+        allowed_roles = ['Admin', 'Manager', 'Staff']
     elif user_group == 'Manager':
         allowed_roles = ['Manager', 'Staff']
     else:
@@ -1921,13 +1923,8 @@ def create_ticket(request):
             async_to_sync(channel_layer.group_send)(
                 "escalations",
                 {
-                    "type": "ticket.creation",
-                    "ticket": {
-                        "id": ticket.id,
-                        "title": ticket.title,
-                        "priority": ticket.priority,
-                        "created_at": ticket.created_at.strftime("%Y-%m-%d %H:%M")
-                    }
+                    "type": "ticket_creation",
+                    "ticket": ticket.id, 
                 }
             )
             # Redirect based on “create another” checkbox
@@ -2054,15 +2051,12 @@ def notify_group(level, ticket):
         fail_silently=False
     )
 
-def get_escalated_tickets(request):
-    tickets = Ticket.objects.filter(is_escalated=True).order_by("-escalated_at")[:5]
-    ticket_data = [{
-        "id": ticket.id,
-        "title": ticket.title,
-        "priority": ticket.priority,
-        "escalated_at": ticket.escalated_at.strftime("%Y-%m-%d %H:%M")
-    } for ticket in tickets]
-    return JsonResponse({"tickets": ticket_data})
+def get_notifications(request):
+    tickets = Ticket.objects.order_by("-created_at")[:5]
+    payload = [serialize_ticket(t) for t in tickets]
+    total = Ticket.objects.count()
+    return JsonResponse({"tickets": payload, "count": total})
+
 
 
 def escalated_tickets_page(request):

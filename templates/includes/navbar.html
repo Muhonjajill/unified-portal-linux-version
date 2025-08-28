@@ -16,7 +16,7 @@
 
       <div class="dropdown-menu notifications-dropdown" id="notificationsDropdown">
         <div id="notificationsList">
-          <p class="empty">No escalated tickets</p>
+          <p class="empty">No tickets</p>
         </div>
         <div class="view-all">
           <a href="{% url 'escalated_tickets_list' %}">View all</a>
@@ -44,86 +44,162 @@
 
 <script>
 const profileViewUrl = "{% url 'profile_view' %}";
+const fetchEscalationsUrl = "{% url 'get_notifications' %}";
+
 let escalationSocket;
 
-(function() {
+// ==== Initialize WebSocket ====
+(function () {
   const wsScheme = window.location.protocol === "https:" ? "wss" : "ws";
   const url = `${wsScheme}://${window.location.host}/ws/escalations/`;
-  console.log("Connecting to WebSocket at:", url);  
+  console.log("Connecting to WebSocket at:", url);
+
   escalationSocket = new WebSocket(url);
+
+  escalationSocket.onopen = () => {
+    console.log("✅ Connected to escalation WebSocket");
+  };
+
+  escalationSocket.onclose = () => {
+    console.error("❌ WebSocket closed unexpectedly");
+  };
+
+  escalationSocket.onmessage = (e) => {
+    const data = JSON.parse(e.data);
+    console.log("📩 WebSocket message received:", data);
+
+    switch (data.type) {
+      case "notifications_list":
+        if (data.tickets) renderNotifications(data.tickets, data.count);
+        break;
+
+      case "ticket_creation":
+        console.log("➡️ Ticket creation payload:", data);
+        if (data.ticket) handleNewTicket(data.ticket);
+        break;
+
+      case "escalation_message":
+        if (data.message) showNotification(data.message);
+        break;
+
+      default:
+        console.warn("⚠️ Unknown WebSocket event type:", data.type);
+    }
+  };
 })();
 
-fetch("{% url 'get_escalated_tickets' %}")
-  .then(r => r.json())
-  .then(data => renderEscalations(data.tickets))
-  .catch(error => console.error("Error fetching escalated tickets:", error));
+// ==== Initial Fetch ====
+fetch(fetchEscalationsUrl)
+  .then((r) => {
+    if (!r.ok) throw new Error("HTTP " + r.status);
+    const ct = r.headers.get("content-type") || "";
+    if (!ct.includes("application/json")) {
+      return r.text().then((txt) => {
+        throw new Error("Expected JSON, got: " + txt.slice(0, 100));
+      });
+    }
+    return r.json();
+  })
+  .then((data) => renderNotifications(data.tickets || [], data.count))
+  .catch((err) => console.error("Error fetching tickets:", err));
 
-function renderEscalations(tickets) {
-  const countEl = document.getElementById("notificationCount");
-  const listEl  = document.getElementById("notificationsList");
-  const viewAllEl = document.querySelector(".view-all");
-  if (!countEl || !listEl) return;
 
-  const latestTickets = tickets.slice(0, 5);
-  countEl.textContent = tickets.length;
-  countEl.style.display = tickets.length > 0 ? "inline-block" : "none";
 
-  // Always show "View All"
-  if (viewAllEl) viewAllEl.style.display = "block";
+// ==== Render Single Notification ====
+function createNotificationItem(ticket) {
+  const div = document.createElement("div");
+  div.classList.add("notification-item");
 
-  listEl.innerHTML = "";
-  if (latestTickets.length === 0) {
-    listEl.innerHTML = `<li class="dropdown-item text-muted empty">No escalations</li>`;
-    return;
-  }
+  // Decide escalation status more carefully
+  const isEsc = ticket.notification_type === "escalated" ||
+                ticket.is_escalated === true ||
+                (ticket.escalated_at && ticket.escalated_at !== null);
 
-  latestTickets.forEach(t => {
-    const div = document.createElement("div");
-    div.classList.add("notification-item");
-    div.innerHTML = `
-      <a class="dropdown-item" href="/tickets/${t.id}/">
-        #${t.id} - ${t.title}<br>
-        <small>${t.priority} | ${t.escalated_at}</small>
-      </a>
-    `;
-    listEl.appendChild(div);
-  });
+  const typeLabel = isEsc
+    ? `<span class="badge badge-escalated">Escalated</span>`
+    : `<span class="badge badge-new">New</span>`;
+
+  const priorityText =
+    typeof ticket.priority === "string" ? ticket.priority : JSON.stringify(ticket.priority);
+
+  div.innerHTML = `
+    <a class="dropdown-item" href="/tickets/${ticket.id}/">
+      ${typeLabel} #${ticket.id} - ${ticket.title}<br>
+      <small>${priorityText} | ${ticket.escalated_at ? ticket.escalated_at : ticket.created_at}</small>
+    </a>
+  `;
+  return div;
 }
 
 
-escalationSocket.onmessage = (e) => {
-  const data = JSON.parse(e.data);
-  console.log("WebSocket message received:", data);
+// ==== Render Escalations ====
+function renderNotifications(tickets, totalCount) {
+  const countEl = document.getElementById("notificationCount");
+  const listEl = document.getElementById("notificationsList");
+  const viewAllEl = document.querySelector(".view-all");
+  if (!countEl || !listEl) return;
 
-  if (data.type === "ticket_creation") {
-    const countEl = document.getElementById("notificationCount");
-    const listEl = document.getElementById("notificationsList");
-    if (!countEl || !listEl) return;
+  listEl.innerHTML = "";
 
-    let current = parseInt(countEl.textContent || "0");
-    countEl.textContent = current + 1;
-    countEl.style.display = "inline-block";
-
-    const emptyMsg = document.querySelector(".empty");
-    if (emptyMsg) emptyMsg.remove();
-
-    const div = document.createElement("div");
-    div.classList.add("notification-item");
-    div.innerHTML = `
-      <a class="dropdown-item" href="/tickets/${data.ticket.id}/">
-        #${data.ticket.id} - ${data.ticket.title}<br>
-        <small>${data.ticket.priority} | ${data.ticket.created_at}</small>
-      </a>
-    `;
-    listEl.prepend(div);
-
-    const items = listEl.querySelectorAll('.notification-item');
-    if (items.length > 5) listEl.removeChild(items[items.length - 1]);
+  if (!tickets || tickets.length === 0) {
+    listEl.innerHTML = `<div class="dropdown-item text-muted empty">No tickets</div>`;
+    countEl.style.display = "none";
+    return;
   }
-};
 
-escalationSocket.onclose = () => console.error("WebSocket closed unexpectedly");
+  tickets.slice(0, 5).forEach((t) => listEl.appendChild(createNotificationItem(t)));
 
+  countEl.textContent = (typeof totalCount === "number") ? totalCount : tickets.length;
+  countEl.style.display = "inline-block";
+  if (viewAllEl) viewAllEl.style.display = "block";
+}
+
+
+
+// ==== Handle New Ticket Event ====
+function handleNewTicket(ticket) {
+  const countEl = document.getElementById("notificationCount");
+  const listEl = document.getElementById("notificationsList");
+  if (!countEl || !listEl) return;
+
+  const emptyMsg = document.querySelector(".empty");
+  if (emptyMsg) emptyMsg.remove();
+
+  // Default the type if backend omitted it (safety)
+  if (!ticket.notification_type) {
+    ticket.notification_type = (ticket.is_escalated || ticket.escalated_at) ? "escalated" : "new";
+  }
+
+  listEl.prepend(createNotificationItem(ticket));
+
+  const items = listEl.querySelectorAll(".notification-item");
+  if (items.length > 5) listEl.removeChild(items[items.length - 1]);
+
+  // If we don't know the real total, at least bump the badge locally
+  const current = parseInt(countEl.textContent || "0", 10);
+  countEl.textContent = isNaN(current) ? 1 : (current + 1);
+  countEl.style.display = "inline-block";
+}
+
+
+// ==== Show Text Notification ====
+function showNotification(message) {
+  const listEl = document.getElementById("notificationsList");
+  if (!listEl) return;
+
+  const text = (typeof message === "string") ? message : JSON.stringify(message);
+
+  const div = document.createElement("div");
+  div.classList.add("notification-item", "new-message");
+  div.innerHTML = `<div class="dropdown-item">🔔 ${text}</div>`;
+  listEl.prepend(div);
+
+  setTimeout(() => { div.remove(); }, 10000);
+}
+
+
+
+// ==== Dropdown Toggle ====
 const bell = document.getElementById("notificationBell");
 const menu = document.getElementById("notificationsDropdown");
 if (bell && menu) {

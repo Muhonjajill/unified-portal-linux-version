@@ -142,12 +142,15 @@
   right: 0;
   background: white;
   color: black;
-  min-width: 250px;
+  min-width: 280px;
   box-shadow: 0 4px 6px rgba(0,0,0,0.2);
   border-radius: 6px;
   z-index: 100;
-  max-height: 300px;  
-  overflow-y: auto;   
+}
+
+#notificationsList {
+  max-height: 300px;
+  overflow-y: auto;
 }
 
 .notification-item {
@@ -169,12 +172,39 @@
 }
 
 .notifications-dropdown .view-all {
+  border-top: 1px solid #ddd;
   padding: 10px;
   text-align: center;
-  border-top: 1px solid #ddd;
-  background-color: #f1f3f5;  
+  background-color: #f9f9f9;
 }
 
+.notification-item.new-message {
+  background: #fef3c7;
+  border-left: 3px solid #f59e0b;
+  animation: fadeIn 0.3s ease;
+}
+
+@keyframes fadeIn {
+  from { opacity: 0; transform: translateY(-5px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+.badge-new {
+  background: #28a745;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  margin-right: 4px;
+}
+
+.badge-escalated {
+  background: #dc3545;
+  color: #fff;
+  padding: 2px 6px;
+  border-radius: 8px;
+  font-size: 0.7rem;
+  margin-right: 4px;
+}
 
 /* Dropdown menu */
 .dropdown-menu {
@@ -183,7 +213,7 @@
   right: 0;
   top: 120%;
   background-color: #fff;
-  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1); /* Stronger shadow for emphasis */
+  box-shadow: 0 6px 16px rgba(0, 0, 0, 0.1); 
   border-radius: 8px;
   min-width: 180px;
   overflow: hidden;
