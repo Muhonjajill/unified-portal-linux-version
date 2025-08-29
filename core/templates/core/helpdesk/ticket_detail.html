@@ -11,7 +11,11 @@
 <div class="ticket-detail-container">
   <div class="ticket-card">
     <h2>🎟️ Ticket 0{{ ticket.id }} - {{ ticket.title }}</h2>
+
+    {% if is_staff_group %}
     <a href="{% url 'ticket_activity_log' ticket.id %}" class="btn btn-info">View Activity Log</a>
+    {% endif %}
+    
     <div class="ticket-info">
       <div><strong>Status:</strong> <span class="badge badge-{{ ticket.status }}">{{ ticket.get_status_display }}</span></div>
       <div><strong>Priority:</strong> <span class="badge badge-{{ ticket.priority }}">{{ ticket.get_priority_display }}</span></div>
@@ -65,26 +69,28 @@
       {% endif %}
     </div>
 
-    <div class="mt-4">
-      
-        <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editTicketModal">✏️ Edit Ticket</button>
-
-          <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#resolveTicketModal">
-            ✅ Resolve Ticket
+   <div class="mt-4">
+      {% if is_staff_group %}
+          
+          <button type="button" class="btn btn-outline-primary" data-bs-toggle="modal" data-bs-target="#editTicketModal">
+            ✏️ Edit Ticket
           </button>
 
-          <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#escalateTicketModal">🚨 Escalate Ticket</button>
-
-      {% if can_resolve %}
-       
-          <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#resolveTicketModal">
-            ✅ Resolve Ticket
+          <button type="button" class="btn btn-danger" data-bs-toggle="modal" data-bs-target="#escalateTicketModal">
+            🚨 Escalate Ticket
           </button>
-       
-      {% else %}
-        <span class="badge badge-success">✔️ Resolved</span>
+
+          {% if can_resolve and ticket.status != 'closed' %}
+              <button type="button" class="btn btn-success" data-bs-toggle="modal" data-bs-target="#resolveTicketModal">
+                  ✅ Resolve Ticket
+              </button>
+          {% elif ticket.status == 'closed' %}
+              <span class="badge bg-success">✔️ Resolved</span>
+          {% endif %}
       {% endif %}
     </div>
+
+
 
     <a href="{% url 'tickets' %}" class="btn btn-back mt-3" style="background-color: #007bff; color: #fff;">← Back to Tickets</a>
 

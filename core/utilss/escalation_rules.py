@@ -14,6 +14,8 @@ from django.conf import settings
 from asgiref.sync import async_to_sync
 from channels.layers import get_channel_layer
 from core.uttils.serializers import serialize_ticket
+from core.utilss.escalation_constants import ESCALATION_TIME_LIMITS, ESCALATION_FLOW
+
 
 import logging
 
@@ -62,9 +64,9 @@ CATEGORY_TO_ESCALATION_TYPE = {
 
 TIER_MAPPING = {
     'low': 'Tier 1',
-    'medium': 'Tier 2',
-    'high': 'Tier 3',
-    'critical': 'Tier 4',
+    'medium': 'Tier 1',
+    'high': 'Tier 1',
+    'critical': 'Tier 1',
 }
 
 ESCALATION_FLOW = {
@@ -103,143 +105,82 @@ def send_ticket_assignment_notification(ticket):
         {"type": "ticket_assignment_notification", "message": message}
     )
 
-""" 
-def escalate_ticket(ticket):
-    from core.models import EscalationHistory
-    from .escalation_rules import send_escalation_email
-
-    # Get the current escalation level, default to 'Tier 1'
-    current_level = ticket.current_escalation_level or 'Tier 1'
-
-    # Get the next escalation level based on the current level
-    next_level = ESCALATION_FLOW.get(current_level)
-
-    # If no next level is found, we can't escalate further
-    if not next_level:
-        print(f"Ticket {ticket.id} is already at the highest escalation level: {current_level}")
-        return  # Stop here if we can't escalate further
-
-    # Now print after assigning next_level
-    print(f"Escalating Ticket {ticket.id} from {current_level} to {next_level}")
-
-    # Proceed with the escalation
-    ticket.current_escalation_level = next_level
-    ticket.is_escalated = True
-    ticket.escalated_at = timezone.now()
-    ticket.save()
-
-    # Send WebSocket notification
-    channel_layer = get_channel_layer()
-    async_to_sync(channel_layer.group_send)(
-        "escalations",
-        {
-            "type": "escalation_message",
-            "message": {
-                "id": ticket.id,
-                "title": ticket.title,
-                "priority": ticket.priority,
-                "escalated_at": ticket.escalated_at.strftime("%Y-%m-%d %H:%M"),
-            },
-        }
-    )
-
-    # Log escalation history
-    EscalationHistory.objects.create(
-        ticket=ticket,
-        escalated_by=None,  # System triggered
-        from_level=current_level,
-        to_level=next_level,
-        note=f"Auto-escalated due to time threshold for priority '{ticket.priority}'."
-    )
-
-    # Send escalation email
-    send_escalation_email(ticket, next_level)
-
-"""
 
 def escalate_ticket(ticket):
-    """Escalate ticket based on its zone and priority."""
     now = timezone.now()
-    escalation_time = None
     escalation_level = ticket.current_escalation_level or 'Tier 1'
 
-    # Check if zone is defined
+    # Ensure zone is set
     if not ticket.zone:
         logger.warning(f"Ticket {ticket.id} has no zone defined. Assigning default zone 'A'.")
         try:
-            # Attempt to fetch the Zone instance by label
-            ticket.zone = Zone.objects.get(name='Zone A')  # Adjust as needed for dynamic zones
+            ticket.zone = Zone.objects.get(name='Zone A')
         except Zone.DoesNotExist:
-            # Create the zone if it doesn't exist
-            ticket.zone = Zone.objects.create(name='Zone A')  # Default zone creation if not found
+            ticket.zone = Zone.objects.create(name='Zone A')
 
-    # Log ticket details before escalation
-    logger.debug(f"Escalating Ticket {ticket.id}: Current Level: {escalation_level}, Priority: {ticket.priority}, Zone: {ticket.zone.name}")
-
-    # Set escalation time based on the zone
+    # Zone-based thresholds
     if ticket.zone.name == 'Zone A':
-        escalation_time = timedelta(minutes=5)
+        zone_threshold = timedelta(minutes=5)
     elif ticket.zone.name == 'Zone B':
-        escalation_time = timedelta(minutes=10)
+        zone_threshold = timedelta(minutes=10)
     elif ticket.zone.name == 'Zone C':
-        escalation_time = timedelta(minutes=15)
+        zone_threshold = timedelta(minutes=15)
+    else:
+        zone_threshold = timedelta(minutes=5)
 
-    if not escalation_time:
-        logger.info(f"Ticket {ticket.id} has no defined escalation time based on zone {ticket.zone.name}. No escalation.")
-        return  # No escalation for unknown zones
+    # Priority-based thresholds
+    threshold_hours = ESCALATION_TIME_LIMITS.get(ticket.priority.lower(), 1)
+    priority_threshold = timedelta(hours=threshold_hours)
 
-    # Log when we are checking the escalation time condition
-    logger.debug(f"Ticket {ticket.id}: Created at {ticket.created_at}. Checking if it exceeds {ticket.created_at + escalation_time}. Now: {now}")
-    
-    if now >= ticket.created_at + escalation_time:
+    # Pick whichever comes first
+    escalation_time = min(priority_threshold, zone_threshold)
+
+    # 🔑 Compare against last escalation (not just creation)
+    last_escalation_time = ticket.escalated_at or ticket.created_at
+
+    if now >= last_escalation_time + escalation_time:
         logger.info(f"Ticket {ticket.id} exceeds escalation time. Proceeding with escalation.")
 
-        # Escalate based on the priority and zone
-        next_level = None
-        if ticket.priority == 'critical':
-            if escalation_level == 'Tier 3':
-                next_level = 'Tier 4'  # Directly set next level for critical priority
+        if ticket.priority.lower() == 'critical':
+            if escalation_level != 'Tier 4':
+                next_level = ESCALATION_FLOW.get(escalation_level)
             else:
-                next_level = ESCALATION_FLOW.get(escalation_level)  # Check for next level if not critical
+                next_level = None
         else:
-            next_level = ESCALATION_FLOW.get(escalation_level)  # Get next level for non-critical priorities
+            next_level = ESCALATION_FLOW.get(escalation_level)
 
         if next_level:
-            # Log the level change
-            logger.info(f"Ticket {ticket.id} escalated from {ticket.current_escalation_level} to {next_level}")
+            logger.info(f"Ticket {ticket.id} escalated from {escalation_level} → {next_level}")
 
-            # Save the escalation changes
             ticket.current_escalation_level = next_level
             ticket.is_escalated = True
-            ticket.escalated_at = now
+            ticket.escalated_at = now  
             ticket.save()
 
-            # Send escalation email
             send_escalation_email(ticket, next_level)
 
-            # Log escalation history
             EscalationHistory.objects.create(
                 ticket=ticket,
                 from_level=escalation_level,
                 to_level=next_level,
-                note=f"Auto-escalated based on zone {ticket.zone.name} and priority {ticket.priority}."
+                note=f"Auto-escalated based on zone {ticket.zone.name} "
+                     f"and priority {ticket.priority}."
             )
         else:
-            logger.info(f"Ticket {ticket.id} cannot be escalated further, already at the highest level.")
-
+            logger.info(f"Ticket {ticket.id} cannot be escalated further (already at Tier 4).")
     else:
-        logger.info(f"Ticket {ticket.id} has not yet exceeded escalation time. No escalation needed.")
+        logger.info(f"Ticket {ticket.id} has not yet exceeded escalation time. No escalation.")
 
 
 def get_escalation_recipients(level):
     
     emails = settings.ESCALATION_LEVEL_EMAILS.get(level)
     if emails:
-        return list(emails)  # convert tuple to list for send_mail
+        return list(emails)  
     return [settings.DEFAULT_FROM_EMAIL]
 
 def get_email_for_level(level):
-    return [settings.ESCALATION_LEVEL_EMAILS.get(level, (None,))[0]]  # Returns list
+    return [settings.ESCALATION_LEVEL_EMAILS.get(level, (None,))[0]]  
 
 def send_escalation_email(ticket, to_level):
     subject = f"[Escalation Notice] Ticket #{ticket.id} escalated to {to_level}"

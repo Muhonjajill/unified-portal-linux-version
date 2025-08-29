@@ -2077,7 +2077,10 @@ def ticket_detail(request, ticket_id):
     is_manager = request.user.groups.filter(name='Manager').exists()
 
     # Fetch staff members for the dropdown (only for managers)
-    staff_users = User.objects.filter(groups__name='Staff')
+    staff_users = User.objects.filter(
+        groups__name__in=['Staff', 'Manager', 'Director']
+    ).distinct()
+
 
     if request.method == 'POST':
         if 'add_comment' in request.POST:
@@ -2189,6 +2192,18 @@ def ticket_detail(request, ticket_id):
 
                 return redirect('ticket_detail', ticket_id=ticket.id)
 
+    is_staff_group = (
+        request.user.groups.filter(name__in=["Staff", "Manager", "Director"]).exists()
+        or request.user.is_staff
+        or request.user.is_superuser
+    )
+
+    can_resolve = (
+        request.user.groups.filter(name__in=["Staff", "Manager", "Director"]).exists()
+        or request.user.is_superuser
+        or request.user.has_perm('can_resolve_ticket')
+    )
+
     context = {
         'ticket': ticket,
         'form': form,
@@ -2196,9 +2211,10 @@ def ticket_detail(request, ticket_id):
         'comment_form': comment_form,
         'is_admin': request.user.is_superuser,
         'is_editor': request.user.groups.filter(name='Editor').exists(),
-        'can_resolve': request.user.groups.filter(name='Resolver').exists(),
+        'can_resolve': can_resolve,
         'is_manager': is_manager,
-        'staff_users': staff_users if is_manager else None
+        'staff_users': staff_users if is_manager else None,
+        "is_staff_group": is_staff_group
     }
 
     return render(request, 'core/helpdesk/ticket_detail.html', context)

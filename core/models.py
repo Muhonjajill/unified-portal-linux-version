@@ -338,17 +338,27 @@ class Ticket(models.Model):
         return self.title
     
     def save(self, *args, **kwargs):
+        if self.terminal and not self.zone:
+            self.zone = self.terminal.zone
+
         if self.problem_category and self.priority:
             from core.utilss.escalation import get_escalation_guidance
             guidance = get_escalation_guidance(self.problem_category.name, self.priority)
             self.escalation_type = guidance['escalation_type']
             self.escalation_action = guidance['escalation_action']
-            self.current_escalation_level = guidance['escalation_tier']
-            
-        if not self.priority:  
-            self.priority = determine_priority(self.problem_category.name if self.problem_category else "", self.title, self.description)
-        
-        super().save(*args, **kwargs) 
+
+            if not self.current_escalation_level:
+                self.current_escalation_level = guidance['escalation_tier']
+
+        if not self.priority:
+            self.priority = determine_priority(
+                self.problem_category.name if self.problem_category else "",
+                self.title,
+                self.description
+            )
+
+        super().save(*args, **kwargs)
+
 
 class EscalationHistory(models.Model):
         

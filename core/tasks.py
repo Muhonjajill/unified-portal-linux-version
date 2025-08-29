@@ -33,101 +33,6 @@ def send_escalation_notification(ticket):
         {"type": "escalation_message", "message": message}
     )
 
-"""
-@shared_task(bind=True, max_retries=3, default_retry_delay=60)
-def run_auto_escalation(self):
-    now = timezone.now()
-    logger.info(f"Auto-escalation kicked off at {now}")
-
-    tickets = Ticket.objects.filter(status__in=['open', 'in_progress'])
-    for t in tickets:
-        if not t.priority or not t.created_at:
-            continue
-
-        prio = t.priority.lower()
-
-        # ——— CRITICAL ———
-        if prio == 'critical':
-            logger.debug(f"[Critical] Ticket={t.id} level={t.current_escalation_level!r} escalated_at={t.escalated_at} now={now}")
-
-            # 1) First: Tier 3 immediately
-            if not t.escalated_at:
-                with transaction.atomic():
-                    t.refresh_from_db()
-                    t.current_escalation_level = 'Tier 3'
-                    t.is_escalated = True
-                    t.escalated_at = now
-                    t.save()
-                    logger.info(f"Ticket {t.id} escalated to {t.current_escalation_level} at {t.escalated_at}")
-
-                    EscalationHistory.objects.create(
-                        ticket=t,
-                        from_level='Tier 1',
-                        to_level='Tier 3',
-                        note="1st escalation for critical priority"
-                    )
-                    send_escalation_notification(t)
-                    send_escalation_email(t, 'Tier 3')
-
-            # 2) After 5 minutes: Tier 4
-            if (t.current_escalation_level or '').strip().lower() == 'tier 3' and now >= t.escalated_at + timedelta(minutes=5):
-                with transaction.atomic():
-                    t.refresh_from_db()
-                    t.current_escalation_level = 'Tier 4'
-                    t.is_escalated = True
-                    t.escalated_at = now
-                    t.save()
-                    logger.info(f"Ticket {t.id} escalated to {t.current_escalation_level} at {t.escalated_at}")
-
-                    EscalationHistory.objects.create(
-                        ticket=t,
-                        from_level='Tier 3',
-                        to_level='Tier 4',
-                        note="2nd escalation for critical priority after 5 minutes"
-                    )
-                    send_escalation_notification(t)
-                    send_escalation_email(t, 'Tier 4')
-
-            continue  # Done with critical tickets
-
-        # ——— NON-CRITICAL ———
-        threshold_hours = ESCALATION_TIME_LIMITS.get(prio)
-        if threshold_hours is None:
-            continue
-
-        # 1) Initial escalation at creation + threshold_hours
-        if not t.escalated_at and now >= t.created_at + timedelta(hours=threshold_hours):
-            with transaction.atomic():
-                t.refresh_from_db()
-                escalate_ticket(t)  # Using your custom escalate_ticket function
-                t.escalated_at = now
-                t.save()
-                logger.info(f"Ticket {t.id} escalated to {t.current_escalation_level} at {t.escalated_at}")
-                send_escalation_notification(t)
-            continue
-
-        # 2) Subsequent escalations every 10 minutes
-        if t.escalated_at and now >= t.escalated_at + timedelta(minutes=10):
-            current = t.current_escalation_level or 'Tier 1'
-            next_level = ESCALATION_FLOW.get(current)
-            if next_level:
-                with transaction.atomic():
-                    t.refresh_from_db()
-                    t.current_escalation_level = next_level
-                    t.is_escalated = True
-                    t.escalated_at = now
-                    t.save()
-                    logger.info(f"Ticket {t.id} escalated to {t.current_escalation_level} at {t.escalated_at}")
-
-                    EscalationHistory.objects.create(
-                        ticket=t,
-                        from_level=current,
-                        to_level=next_level,
-                        note="Subsequent escalation after 10 minutes"
-                    )
-                    send_escalation_notification(t)
-                    send_escalation_email(t, next_level)
-"""
 
 @shared_task(bind=True, max_retries=3, default_retry_delay=60)
 def run_auto_escalation(self):
@@ -135,17 +40,20 @@ def run_auto_escalation(self):
     now = timezone.now()
     logger.info(f"Auto-escalation kicked off at {now}")
 
-    # Fetch tickets that are not closed or resolved
     tickets = Ticket.objects.filter(status__in=['open', 'in_progress'])
 
     for ticket in tickets:
-        logger.debug(f"Checking ticket {ticket.id}: Assigned to {ticket.assigned_to}, Priority: {ticket.priority}")
-        
+        # 🔑 Reload the fresh DB state to avoid stale current_escalation_level
+        ticket = Ticket.objects.get(id=ticket.id)
+
+        logger.debug(
+            f"Checking ticket {ticket.id}: "
+            f"Escalation={ticket.current_escalation_level}, "
+            f"Assigned={ticket.assigned_to}, Priority={ticket.priority}"
+        )
+
         if ticket.assigned_to:
-            # Escalate ticket based on zone and priority
-            logger.debug(f"Escalating ticket {ticket.id}")
             escalate_ticket(ticket)
         else:
-            logger.debug(f"Ticket {ticket.id} is unassigned. Sending notification.")
             send_unassigned_ticket_notification(ticket)
 
