@@ -125,6 +125,7 @@ urlpatterns = [
     path('tickets/<int:ticket_id>/escalate/', views.escalate_ticket, name='escalate_ticket'),
     
     path('notifications/', views.get_notifications, name='get_notifications'),
+    path("notifications/mark_read/<int:ticket_id>/", views.mark_notification_read, name="mark_notification_read"),
 
     path('tickets/escalated/', views.escalated_tickets_page, name='escalated_tickets_list'),
 ]+ static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

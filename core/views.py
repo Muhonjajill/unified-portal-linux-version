@@ -52,6 +52,8 @@ from django.urls import reverse
 from openpyxl.styles import Border, Side
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync 
+from .models import Ticket, UserNotification
+
 
 def in_group(user, group_name):
     return user.is_authenticated and (user.is_superuser or user.groups.filter(name=group_name).exists())
@@ -2056,6 +2058,32 @@ def get_notifications(request):
     payload = [serialize_ticket(t) for t in tickets]
     total = Ticket.objects.count()
     return JsonResponse({"tickets": payload, "count": total})
+
+@login_required
+@require_POST
+def mark_notification_read(request, ticket_id):
+    try:
+        data = json.loads(request.body.decode("utf-8") or "{}")
+        notif_type = data.get("type")
+    except json.JSONDecodeError:
+        notif_type = None
+
+    notif = UserNotification.objects.filter(
+        user=request.user,
+        ticket_id=ticket_id,
+        is_read=False
+    ).first()
+
+    if notif:
+        notif.is_read = True
+        notif.save()
+        return JsonResponse({"success": True, "type": notif_type})
+
+    return JsonResponse({
+        "success": False,
+        "info": "No UserNotification found, handled client-side",
+        "type": notif_type,
+    })
 
 
 
