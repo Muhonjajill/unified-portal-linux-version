@@ -2039,7 +2039,6 @@ def escalate_ticket(request, ticket_id):
     })
 
 def get_email_for_level(level):
-    # This function fetches emails based on escalation level from settings.
     return settings.ESCALATION_LEVEL_EMAILS.get(level, [])
 
 def notify_group(level, ticket):
@@ -2053,11 +2052,22 @@ def notify_group(level, ticket):
         fail_silently=False
     )
 
+@login_required
 def get_notifications(request):
-    tickets = Ticket.objects.order_by("-created_at")[:5]
-    payload = [serialize_ticket(t) for t in tickets]
-    total = Ticket.objects.count()
-    return JsonResponse({"tickets": payload, "count": total})
+    qs = UserNotification.objects.filter(
+        user=request.user
+    ).select_related('ticket')
+
+    total_unread = qs.filter(is_read=False).count()
+
+    top5 = qs.order_by('-ticket__created_at')[:5]
+
+    payload = [serialize_ticket(un.ticket) for un in top5]
+    return JsonResponse({
+        "tickets": payload,
+        "count": total_unread,
+    })
+
 
 @login_required
 @require_POST
