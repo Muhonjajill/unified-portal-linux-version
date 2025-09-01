@@ -4,7 +4,7 @@ from channels.db import database_sync_to_async
 from django.db.models.functions import Coalesce
 from django.db.models import DateTimeField
 from core.uttils.serializers import serialize_ticket
-from .models import Ticket
+from core.models import Ticket, Customer, Terminal, Profile
 
 class EscalationConsumer(AsyncWebsocketConsumer):
     group_name = "escalations"
@@ -29,12 +29,52 @@ class EscalationConsumer(AsyncWebsocketConsumer):
 
     @database_sync_to_async
     def _get_latest_tickets(self):
-        return list(Ticket.objects.order_by("-created_at")[:5])
+        user = self.scope["user"]
+        profile = getattr(user, "profile", None)
+
+        qs = Ticket.objects.none()
+
+        # Internal staff see all tickets
+        if user.is_superuser or user.groups.filter(
+            name__in=['Admin', 'Director', 'Manager', 'Staff']
+        ).exists():
+            qs = Ticket.objects.all()
+
+        # Overseer: tickets for their customers
+        elif Customer.objects.filter(overseer=user).exists():
+            overseer_customers = Customer.objects.filter(overseer=user)
+            qs = Ticket.objects.filter(customer__in=overseer_customers)
+
+        # Custodian: tickets for their terminal
+        elif profile and profile.terminal:
+            if profile.terminal.custodian == user:
+                qs = Ticket.objects.filter(terminal=profile.terminal)
+
+        return list(qs.order_by("-created_at")[:5])
 
 
     @database_sync_to_async
     def _get_total_count(self):
-        return Ticket.objects.count()
+        user = self.scope["user"]
+        profile = getattr(user, "profile", None)
+
+        qs = Ticket.objects.none()
+
+        if user.is_superuser or user.groups.filter(
+            name__in=['Admin', 'Director', 'Manager', 'Staff']
+        ).exists():
+            qs = Ticket.objects.all()
+
+        elif Customer.objects.filter(overseer=user).exists():
+            overseer_customers = Customer.objects.filter(overseer=user)
+            qs = Ticket.objects.filter(customer__in=overseer_customers)
+
+        elif profile and profile.terminal:
+            if profile.terminal.custodian == user:
+                qs = Ticket.objects.filter(terminal=profile.terminal)
+
+        return qs.count()
+
 
 
     async def escalation_update(self, event):
@@ -42,18 +82,19 @@ class EscalationConsumer(AsyncWebsocketConsumer):
         await self.send_latest()
 
     async def ticket_creation(self, event):
-        t = event["ticket"]
-        if isinstance(t, dict):
-            payload = t
-        else:
-            ticket = await database_sync_to_async(Ticket.objects.get)(id=t)
-            payload = serialize_ticket(ticket)
-
-        # Send single new ticket event
-        await self.send(text_data=json.dumps({
-            "type": "ticket_creation",
-            "ticket": payload,
-        }))
+            t = event["ticket"]
+            if isinstance(t, dict):
+                payload = t
+            else:
+                try:
+                    ticket = await database_sync_to_async(Ticket.objects.get)(id=t)
+                    payload = serialize_ticket(ticket)
+                except ObjectDoesNotExist:
+                    return
+            await self.send(text_data=json.dumps({
+                "type": "ticket_creation",
+                "ticket": payload,
+            }))
 
     async def escalation_message(self, event):
         # Optional toast-like messages
@@ -65,14 +106,43 @@ class EscalationConsumer(AsyncWebsocketConsumer):
 
 
     async def unassigned_ticket_notification(self, event):
-        """Send unassigned ticket notification."""
+        """Send unassigned ticket notification only if relevant for this user."""
+        user = self.scope["user"]
+        profile = getattr(user, "profile", None)
+
         ticket = event.get("ticket")
-        if ticket:
-            # Ensure ticket is an object, not a dict
-            if isinstance(ticket, dict):  # If it's a dictionary, retrieve the object from the DB
-                ticket = await database_sync_to_async(Ticket.objects.get)(id=ticket.get("id"))
-            ticket_data = serialize_ticket(ticket)  # Now it should be a model instance
+        if not ticket:
+            return
+
+        # Ensure we have a Ticket object
+        if isinstance(ticket, dict):
+            ticket = await database_sync_to_async(Ticket.objects.get)(id=ticket.get("id"))
+
+        send_to_user = await self._should_send_unassigned(user, profile, ticket)
+
+        if send_to_user:
+            ticket_data = serialize_ticket(ticket)
             await self.send(text_data=json.dumps({
                 "type": "unassigned_ticket_notification",
                 "ticket": ticket_data
             }))
+
+    @database_sync_to_async
+    def _should_send_unassigned(self, user, profile, ticket):
+        """Check if user should see this unassigned ticket (runs in threadpool)."""
+        # Staff/admins: see all
+        if user.is_superuser or user.groups.filter(
+            name__in=["Admin", "Director", "Manager", "Staff"]
+        ).exists():
+            return True
+
+        # Overseer: tickets for their customers
+        if ticket.customer and ticket.customer.overseer_id == user.id:
+            return True
+
+        # Custodian: tickets for their assigned terminal
+        if profile and profile.terminal and ticket.terminal_id == profile.terminal_id:
+            if profile.terminal.custodian_id == user.id:
+                return True
+
+        return False

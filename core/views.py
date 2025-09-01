@@ -2052,21 +2052,53 @@ def notify_group(level, ticket):
         fail_silently=False
     )
 
+
 @login_required
 def get_notifications(request):
-    qs = UserNotification.objects.filter(
-        user=request.user
-    ).select_related('ticket')
+    profile = getattr(request.user, "profile", None)
+    qs = UserNotification.objects.none()
 
+    # Internal staff: see all tickets
+    if request.user.is_superuser or request.user.groups.filter(
+        name__in=['Admin','Director','Manager','Staff']
+    ).exists():
+        qs = UserNotification.objects.all()
+
+    # Overseer: see tickets for all terminals under customers they oversee
+    elif Customer.objects.filter(overseer=request.user).exists():
+        overseer_customers = Customer.objects.filter(overseer=request.user)
+        qs = UserNotification.objects.filter(
+            ticket__customer__in=overseer_customers
+        )
+
+    # Custodian: see tickets for the terminal they are assigned to
+    elif profile and profile.terminal:
+        custodian_terminal = profile.terminal
+        if custodian_terminal.custodian == request.user:
+            qs = UserNotification.objects.filter(
+                ticket__terminal=custodian_terminal
+            )
+
+    # ---- Prepare response ----
     total_unread = qs.filter(is_read=False).count()
+    top5 = qs.select_related("ticket", "ticket__customer", "ticket__terminal") \
+             .order_by("-ticket__created_at")[:5]
 
-    top5 = qs.order_by('-ticket__created_at')[:5]
+    if not top5:
+        return JsonResponse({
+            "tickets": [],
+            "count": total_unread,
+            "message": "No notifications available for your role or assignment."
+        })
 
     payload = [serialize_ticket(un.ticket) for un in top5]
     return JsonResponse({
         "tickets": payload,
         "count": total_unread,
     })
+
+
+
 
 
 @login_required

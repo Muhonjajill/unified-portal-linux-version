@@ -2,7 +2,7 @@ from django.db.models.signals import post_migrate, post_save
 from django.dispatch import receiver
 from django.contrib.auth.models import User, Group, Permission
 from django.contrib.contenttypes.models import ContentType
-from core.models import ActivityLog, File, FileAccessLog, Profile, Ticket, TicketComment
+from core.models import ActivityLog, File, FileAccessLog, Profile, Ticket, TicketComment, UserNotification
 from django.core.exceptions import ObjectDoesNotExist
 from channels.layers import get_channel_layer
 from asgiref.sync import async_to_sync
@@ -211,28 +211,28 @@ def log_ticket_resolution(sender, instance, created, **kwargs):
         action = f"Ticket resolved: {instance.title}"
         ActivityLog.objects.create(ticket=instance, action=action, user=instance.updated_by)
 
-"""
-@receiver(post_save, sender=Ticket)
-def send_ticket_creation_notification(sender, instance, created, **kwargs):
-    if created:
-        print('A new Ticket has been created')
-        channel_layer = get_channel_layer()
-        payload = {
-            "id": instance.id,
-            "title": instance.title,
-            "priority": instance.priority or "",
-            "created_at": instance.created_at.strftime("%Y-%m-%d %H:%M"),
-        }
-        async_to_sync(channel_layer.group_send)(
-            "escalations",
-            {
-                "type": "ticket_creation",
-                "ticket": {
-                    "id": instance.id,
-                    "title": instance.title,
-                    "priority": instance.priority,
-                    "created_at": instance.created_at.strftime("%Y-%m-%d %H:%M"),
-                }
-            }
-        )
-"""
+
+@receiver(post_save, sender=Ticket, dispatch_uid="create_ticket_notifications")
+def create_ticket_notifications(sender, instance, created, **kwargs):
+    if not created:
+        return
+    notified_users = set()
+    # Internal staff
+    staff_groups = Group.objects.filter(name__in=['Admin', 'Director', 'Manager', 'Staff'])
+    for group in staff_groups:
+        notified_users.update(group.user_set.all())
+    # Customer overseer
+    if instance.customer and instance.customer.overseer:
+        notified_users.add(instance.customer.overseer)
+    # Terminal custodian
+    if instance.terminal and instance.terminal.custodian:
+        notified_users.add(instance.terminal.custodian)
+    # Create notifications uniquely
+    for user in notified_users:
+        try:
+            UserNotification.objects.get_or_create(
+                user=user,
+                ticket=instance
+            )
+        except IntegrityError:
+            continue
