@@ -211,28 +211,4 @@ def log_ticket_resolution(sender, instance, created, **kwargs):
         action = f"Ticket resolved: {instance.title}"
         ActivityLog.objects.create(ticket=instance, action=action, user=instance.updated_by)
 
-
-@receiver(post_save, sender=Ticket, dispatch_uid="create_ticket_notifications")
-def create_ticket_notifications(sender, instance, created, **kwargs):
-    if not created:
-        return
-    notified_users = set()
-    # Internal staff
-    staff_groups = Group.objects.filter(name__in=['Admin', 'Director', 'Manager', 'Staff'])
-    for group in staff_groups:
-        notified_users.update(group.user_set.all())
-    # Customer overseer
-    if instance.customer and instance.customer.overseer:
-        notified_users.add(instance.customer.overseer)
-    # Terminal custodian
-    if instance.terminal and instance.terminal.custodian:
-        notified_users.add(instance.terminal.custodian)
-    # Create notifications uniquely
-    for user in notified_users:
-        try:
-            UserNotification.objects.get_or_create(
-                user=user,
-                ticket=instance
-            )
-        except IntegrityError:
-            continue
+        
