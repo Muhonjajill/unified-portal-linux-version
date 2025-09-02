@@ -2100,7 +2100,6 @@ def get_notifications(request):
 
 
 
-
 @login_required
 @require_POST
 def mark_notification_read(request, ticket_id):
